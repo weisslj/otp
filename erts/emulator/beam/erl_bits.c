@@ -452,6 +452,9 @@ erts_bs_get_float_2(Process *p, Uint num_bits, unsigned flags, ErlBinMatchBuffer
     double f64;
     byte* fptr;
     FloatDef f;
+#ifdef DOUBLE_MIDDLE_ENDIAN
+    FloatDef ftmp;
+#endif
 
     if (num_bits == 0) {
 	f.fd = 0.0;
@@ -485,7 +488,13 @@ erts_bs_get_float_2(Process *p, Uint num_bits, unsigned flags, ErlBinMatchBuffer
 	f.fd = f32;
     } else {
 	ERTS_FP_ERROR_THOROUGH(p, f64, return THE_NON_VALUE);
+#ifdef DOUBLE_MIDDLE_ENDIAN
+	ftmp.fd = f64;
+	f.fw[0] = ftmp.fw[1];
+	f.fw[1] = ftmp.fw[0];
+#else
 	f.fd = f64;
+#endif
     }
     mb->offset += num_bits;
     hp = HeapOnlyAlloc(p, FLOAT_SIZE_OBJECT);
