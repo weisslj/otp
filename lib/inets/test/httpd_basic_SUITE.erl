@@ -19,6 +19,7 @@
 %%
 -module(httpd_basic_SUITE).
 
+-include_lib("kernel/include/file.hrl").
 -include_lib("common_test/include/ct.hrl").
 -include("inets_test_lib.hrl").
 
@@ -35,6 +36,7 @@ all() ->
      uri_too_long_414, 
      header_too_long_413, 
      escaped_url_in_error_body,
+     script_timeout,
      slowdose
     ].
 
@@ -62,6 +64,7 @@ init_per_suite(Config) ->
 	"~n   Config: ~p", [Config]),
     ok = inets:start(),
     PrivDir = ?config(priv_dir, Config),
+    DataDir = ?config(data_dir, Config),
 
     Dummy = 
 "<HTML>
@@ -74,6 +77,18 @@ DUMMY
 </HTML>",
 
     DummyFile = filename:join([PrivDir,"dummy.html"]),
+    CgiDir =  filename:join(PrivDir, "cgi-bin"),
+    ok = file:make_dir(CgiDir),
+    Cgi = case test_server:os_type() of
+	      {win32, _} ->
+		  "sleep.bat";
+	      _ ->
+		  "sleep.sh"
+	  end,
+    inets_test_lib:copy_file(Cgi, DataDir, CgiDir),
+    AbsCgi = filename:join([CgiDir, Cgi]),
+    {ok, FileInfo} = file:read_file_info(AbsCgi),
+    ok = file:write_file_info(AbsCgi, FileInfo#file_info{mode = 8#00755}),
     {ok, Fd}  = file:open(DummyFile, [write]),
     ok        = file:write(Fd, Dummy),
     ok        = file:close(Fd), 
@@ -84,7 +99,7 @@ DUMMY
 		 {document_root, PrivDir}, 
 		 {bind_address,  "localhost"}],
 
-    [{httpd_conf, HttpdConf} |  Config].
+    [{httpd_conf, HttpdConf}, {cgi_dir, CgiDir}, {cgi_script, Cgi} |  Config].
 
 %%--------------------------------------------------------------------
 %% Function: end_per_suite(Config) -> _
@@ -279,6 +294,43 @@ escaped_url_in_error_body(Config) when is_list(Config) ->
     inets:stop(httpd, Pid),
     tsp("escaped_url_in_error_body -> done"),    
     ok.
+
+
+%%-------------------------------------------------------------------------
+%%-------------------------------------------------------------------------
+
+script_timeout(doc) ->
+    ["Test the httpd script_timeout option"];
+script_timeout(suite) ->
+    [];
+script_timeout(Config) when is_list(Config) ->
+    verify_script_timeout(Config, 20, 200),
+    verify_script_timeout(Config, 5, 403),
+    ok.
+
+verify_script_timeout(Config, ScriptTimeout, StatusCode) ->
+    HttpdConf = ?config(httpd_conf, Config),
+    CgiScript = ?config(cgi_script, Config),
+    CgiDir = ?config(cgi_dir, Config),
+    {ok, Pid} = inets:start(httpd, [{port, 0},
+				    {script_alias,
+				     {"/cgi-bin/", CgiDir ++ "/"}},
+				    {script_timeout, ScriptTimeout}
+				    | HttpdConf]),
+    Info = httpd:info(Pid),
+    Port = proplists:get_value(port, Info),
+    Address = proplists:get_value(bind_address, Info),
+    ok = httpd_test_lib:verify_request(ip_comm, Address, Port, node(),
+				       "GET /cgi-bin/" ++ CgiScript ++
+					   " HTTP/1.0\r\n\r\n",
+				       [{statuscode, StatusCode},
+					{version, "HTTP/1.0"}]),
+    inets:stop(httpd, Pid).
+
+
+%%-------------------------------------------------------------------------
+%%-------------------------------------------------------------------------
+
 slowdose(doc) ->
     ["Testing minimum bytes per second option"];
 slowdose(Config) when is_list(Config) ->
