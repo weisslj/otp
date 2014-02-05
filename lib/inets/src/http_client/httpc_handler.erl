@@ -532,6 +532,12 @@ handle_info({Proto, _Socket, Data},
                 ClientReason = {could_not_parse_as_http, Data}, 
                 ClientErrMsg = httpc_response:error(Request, ClientReason),
                 NewState     = answer_request(Request, ClientErrMsg, State),   
+                {stop, normal, NewState};
+            throw:_Term ->
+                ?hcrd("data processing throw", [{throw, _Term}]),
+                ClientReason = {could_not_parse_as_http, Data},
+                ClientErrMsg = httpc_response:error(Request, ClientReason),
+                NewState     = answer_request(Request, ClientErrMsg, State),
                 {stop, normal, NewState}
         
         end,
@@ -1331,7 +1337,8 @@ handle_keep_alive_queue(#state{status       = keep_alive,
 					     Session, <<>>,
 					     State#state{keep_alive = KeepAlive});
 			{error, Reason} ->
-			    {reply, {keep_alive_failed, Reason}, State}
+			    ?hcrv("keep alive failed", [{reason, Reason}]),
+			    {stop, normal, State}
 		    end
 	    end
     end.
